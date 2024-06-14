@@ -3,6 +3,7 @@ using Substrate.NetApi;
 using Substrate.NetApi.Model.Types;
 using Substrate.NetApi.Model.Types.Base;
 using Substrate.NetApi.Model.Types.Primitive;
+using Substrate.Polkadot.NET.NetApiExt.Client;
 using Substrate.Polkadot.NET.NetApiExt;
 using Substrate.Polkadot.NET.NetApiExt.Generated;
 using Substrate.Polkadot.NET.NetApiExt.Generated.Model.pallet_referenda.types;
@@ -16,13 +17,16 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Substrate.Integration.Helper;
 using Substrate;
+using Substrate.Integration;
 
 public class PolkadotManager : MonoBehaviour
 {
     [SerializeField]
     private string _nodeUrl = "wss://polkadot-rpc.dwellir.com";
 
-    private SubstrateClientExt _client;
+    // private SubstrateClientExt _client;
+
+    private SubstrateClient client;
 
     private void Start()
     {
@@ -31,12 +35,15 @@ public class PolkadotManager : MonoBehaviour
 
     private void InitializeClient()
     {
-        if (_client != null)
+        if (client != null)
         {
             return;
         }
 
-        _client = new SubstrateClientExt(new Uri(_nodeUrl), Substrate.NetApi.Model.Extrinsics.ChargeTransactionPayment.Default());
+        client = new SubstrateNetwork(null, _nodeUrl);
+
+
+        // _client = new SubstrateClientExt(new Uri(_nodeUrl), Substrate.NetApi.Model.Extrinsics.ChargeTransactionPayment.Default());
         ConnectClientAsync();
     }
 
@@ -44,9 +51,10 @@ public class PolkadotManager : MonoBehaviour
     {
         try
         {
-            await _client.ConnectAsync();
+            // await _client.ConnectAsync();
+            await client.ConnectAsync(true, true, CancellationToken.None);
             Debug.Log("Connected to Polkadot node");
-            await GetAllReferendaAsync(_client, CancellationToken.None);
+            await GetAllReferendaAsync(client, CancellationToken.None);
         }
         catch (UriFormatException ex)
         {
@@ -62,15 +70,21 @@ public class PolkadotManager : MonoBehaviour
         }
     }
 
-    static async Task GetAllReferendaAsync(SubstrateClientExt client, CancellationToken token)
+    static async Task GetAllReferendaAsync(SubstrateClient client, CancellationToken token)
     {
-        Dictionary<U32, EnumReferendumInfo> referendumInfoDict = new Dictionary<U32, EnumReferendumInfo>();
 
         try
         {
+            // getting all referendas
+            Dictionary<U32, EnumReferendumInfo> referendumInfoDict = await client.GetAllStorageAsync<U32, EnumReferendumInfo>("Referenda", "ReferendumInfoFor", true, token);
+
+            Debug.Log($"There are currently {referendumInfoDict.Count} referendas on Polkadot!");
+
             // getting a single one
-            EnumReferendumInfo enumReferendumInfo = await client.ReferendaStorage.ReferendumInfoFor(new U32(0), token);
-            referendumInfoDict[new U32(0)] = enumReferendumInfo;
+            EnumReferendumInfo enumReferendumInfo = await client.SubstrateClient.ReferendaStorage.ReferendumInfoFor(referendumInfoDict.Keys.First(), null, token);
+
+            Debug.Log($"The referanda with the key {referendumInfoDict.Keys.First().Value} has the following information {enumReferendumInfo.Value}!");
+
 
             Dictionary<uint, ReferendumInfoSharp> finalDict = new Dictionary<uint, ReferendumInfoSharp>();
             foreach (var item in referendumInfoDict)
@@ -78,11 +92,13 @@ public class PolkadotManager : MonoBehaviour
                 finalDict[item.Key.Value] = new ReferendumInfoSharp(item.Value);
             }
 
+            // Now `finalDict` contains `uint` keys and `ReferendumInfoSharp` values
             foreach (var item in finalDict)
             {
                 Debug.Log($"Referendum: {item.Key}");
-                Debug.Log($"{JsonSerializer.Serialize(item.Value, new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter(), new Substrate.Integration.Helper.BigIntegerConverter() } })}\n");
+                Debug.Log($"{JsonSerializer.Serialize(item.Value, new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter(), new Substrate.Integration.Helper.BigIntegerConverter() } })}\n" );
             }
+
         }
         catch (OperationCanceledException ex)
         {
