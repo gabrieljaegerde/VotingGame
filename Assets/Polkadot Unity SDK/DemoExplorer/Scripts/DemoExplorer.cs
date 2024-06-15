@@ -4,27 +4,21 @@ using Substrate.NetApi;
 using Substrate.NetApi.Model.Extrinsics;
 using Substrate.NetApi.Model.Rpc;
 using Substrate.NetApi.Model.Types;
-using Substrate.NetApi.Model.Types.Base;
 using Substrate.NetApi.Model.Types.Primitive;
 using System;
 using System.Collections.Generic;
-using System.Numerics;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UIElements;
-using KusamaExt = Substrate.Kusama.NET.NetApiExt.Generated;
-using LocalExt = Substrate.Hexalem.NET.NetApiExt.Generated;
-using PolkadotExt = Substrate.Polkadot.NET.NetApiExt.Generated;
+using Substrate.Integration;
 
 namespace Substrate
 {
     public enum SubstrateChains
     {
-        Polkadot,
-        Kusama,
-        Local,
+        Polkadot
     }
 
     public enum SubstrateCmds
@@ -58,15 +52,12 @@ namespace Substrate
 
         private VisualElement _velChainLogo;
 
-        private SubstrateClient _client;
+        private SubstrateNetwork _client;
         private bool _running = false;
 
         private Texture2D _polkadotLogo, _kusamaLogo, _hostLogo;
         private Texture2D _checkYes, _checkNo;
 
-        private Func<CancellationToken, Task<RuntimeVersion>> StateRuntimeVersion { get; set; }
-        private Func<CancellationToken, Task<Properties>> SystemProperties { get; set; }
-        private Func<CancellationToken, Task<U32>> SystemStorageNumber { get; set; }
         private Func<CancellationToken, Task<U32>> SystemStorageCustom { get; set; }
 
         private JsonSerializerOptions _jsonSerializerOptions;
@@ -113,12 +104,6 @@ namespace Substrate
             var velSelPolkadotCheck = velMainView.Q<VisualElement>("VelSelPolkadotCheck");
             velSelPolkadotCheck.RegisterCallback<ClickEvent>(ev => OnSelectClicked(SubstrateChains.Polkadot));
             _velSelectionArray.Add(velSelPolkadotCheck);
-            var velSelKusamaCheck = velMainView.Q<VisualElement>("VelSelKusamaCheck");
-            velSelKusamaCheck.RegisterCallback<ClickEvent>(ev => OnSelectClicked(SubstrateChains.Kusama));
-            _velSelectionArray.Add(velSelKusamaCheck);
-            var velSelLocalCheck = velMainView.Q<VisualElement>("VelSelLocalCheck");
-            velSelLocalCheck.RegisterCallback<ClickEvent>(ev => OnSelectClicked(SubstrateChains.Local));
-            _velSelectionArray.Add(velSelLocalCheck);
 
             _lblCommandArray = new List<Label>();
 
@@ -161,7 +146,7 @@ namespace Substrate
             // disconnect when changing substrate chain
             if (_client != null && _client.IsConnected)
             {
-                await _client.CloseAsync();
+                await _client.DisconnectAsync();
                 _btnConnection.text = "CONNECT";
             }
 
@@ -183,43 +168,7 @@ namespace Substrate
                         url = _polkadotNode;
                         _lblNodeUrl.text = url;
                         _velChainLogo.style.backgroundImage = _polkadotLogo;
-                        _client = new PolkadotExt.SubstrateClientExt(new Uri(url), ChargeTransactionPayment.Default());
-
-                        StateRuntimeVersion = ((PolkadotExt.SubstrateClientExt)_client).State.GetRuntimeVersionAsync;
-                        SystemProperties = ((PolkadotExt.SubstrateClientExt)_client).System.PropertiesAsync;
-                        SystemStorageNumber = ((PolkadotExt.SubstrateClientExt)_client).SystemStorage.Number;
-
-                        SystemStorageCustom = ((PolkadotExt.SubstrateClientExt)_client).SystemStorage.EventCount;
-                    }
-                    break;
-
-                case SubstrateChains.Kusama:
-                    {
-                        url = _kusamaNode;
-                        _lblNodeUrl.text = url;
-                        _velChainLogo.style.backgroundImage = _kusamaLogo;
-                        _client = new KusamaExt.SubstrateClientExt(new Uri(url), ChargeTransactionPayment.Default());
-
-                        StateRuntimeVersion = ((KusamaExt.SubstrateClientExt)_client).State.GetRuntimeVersionAsync;
-                        SystemProperties = ((KusamaExt.SubstrateClientExt)_client).System.PropertiesAsync;
-                        SystemStorageNumber = ((KusamaExt.SubstrateClientExt)_client).SystemStorage.Number;
-
-                        SystemStorageCustom = ((KusamaExt.SubstrateClientExt)_client).SystemStorage.EventCount;
-                    }
-                    break;
-
-                case SubstrateChains.Local:
-                    {
-                        url = "ws://127.0.0.1:9944";
-                        _lblNodeUrl.text = url;
-                        _velChainLogo.style.backgroundImage = _hostLogo;
-                        _client = new LocalExt.SubstrateClientExt(new Uri(url), ChargeTransactionPayment.Default());
-
-                        StateRuntimeVersion = ((LocalExt.SubstrateClientExt)_client).State.GetRuntimeVersionAsync;
-                        SystemProperties = ((LocalExt.SubstrateClientExt)_client).System.PropertiesAsync;
-                        SystemStorageNumber = ((LocalExt.SubstrateClientExt)_client).SystemStorage.Number;
-
-                        SystemStorageCustom = ((LocalExt.SubstrateClientExt)_client).SystemStorage.EventCount;
+                        _client = new SubstrateNetwork(null, url);
                     }
                     break;
 
@@ -295,7 +244,7 @@ namespace Substrate
         {
             string commandText = SubstrateCmds.Runtime.ToString().ToLower();
             _lblNodeInfo.text = $"{commandText}\n -> {commandText} = ...";
-            var runtimeVersion = await StateRuntimeVersion(CancellationToken.None);
+            var runtimeVersion = await _client.SubstrateClient.State.GetRuntimeVersionAsync(CancellationToken.None);
 
             _lblNodeInfo.text = runtimeVersion == null
                 ? $"{commandText}\n -> {commandText} = null"
@@ -306,7 +255,7 @@ namespace Substrate
         {
             string commandText = SubstrateCmds.Properties.ToString().ToLower();
             _lblNodeInfo.text = $"{commandText}\n -> {commandText} = ...";
-            var properties = await SystemProperties(CancellationToken.None);
+            var properties = _client.SubstrateClient.Properties;
 
             _lblNodeInfo.text = properties == null
                 ? $"{commandText}\n -> {commandText} = null"
@@ -317,7 +266,7 @@ namespace Substrate
         {
             string commandText = SubstrateCmds.Block.ToString().ToLower();
             _lblNodeInfo.text = $"{commandText}\n -> {commandText} = ...";
-            var blockNumber = await SystemStorageNumber(CancellationToken.None);
+            var blockNumber = await _client.SubstrateClient.SystemStorage.Number(null, CancellationToken.None);
 
             _lblNodeInfo.text = blockNumber == null
                 ? $"{commandText}\n -> {commandText} = null"
@@ -354,7 +303,7 @@ namespace Substrate
 
             if (_client.IsConnected)
             {
-                await _client.CloseAsync();
+                await _client.DisconnectAsync();
             }
             else
             {
@@ -362,7 +311,7 @@ namespace Substrate
             }
 
             _lblCommandArray.ForEach(p => p.SetEnabled(_client.IsConnected));
-            _lblCmdTransfer.SetEnabled(_client.IsConnected && _client is LocalExt.SubstrateClientExt);
+            _lblCmdTransfer.SetEnabled(false);
 
             _lblNodeInfo.text = $"{_btnConnection.text.ToLower()}\n -> client is_connected = {_client.IsConnected}";
 
@@ -378,54 +327,7 @@ namespace Substrate
         /// </summary>
         private async void OnTransferClicked()
         {
-            if (_running || _client == null || !_client.IsConnected)
-            {
-                return;
-            }
-
-            _running = true;
-
-            var logStr = "";
-
-            var accountAlice = new LocalExt.Model.sp_core.crypto.AccountId32();
-            accountAlice.Create(Utils.GetPublicKeyFrom(Alice.Value));
-
-            var properties = await SystemProperties(CancellationToken.None);
-            var tokenDecimals = BigInteger.Pow(10, properties.TokenDecimals);
-
-            var accountInfo = await ((LocalExt.SubstrateClientExt)_client).SystemStorage.Account(accountAlice, CancellationToken.None);
-            if (accountInfo == null)
-            {
-                Debug.Log("No account found!");
-            }
-
-            logStr += $"Alice account has: {BigInteger.Divide(accountInfo.Data.Free.Value, tokenDecimals)} {properties.TokenSymbol}\n";
-            _lblNodeInfo.text = logStr;
-
-            var account32 = new LocalExt.Model.sp_core.crypto.AccountId32();
-            account32.Create(Utils.GetPublicKeyFrom("5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"));
-
-            var multiAddress = new LocalExt.Model.sp_runtime.multiaddress.EnumMultiAddress();
-            multiAddress.Create(LocalExt.Model.sp_runtime.multiaddress.MultiAddress.Id, account32);
-
-            var amount = new BaseCom<U128>();
-            amount.Create(BigInteger.Multiply(42, tokenDecimals));
-            logStr += $"Sending Bob: {amount.Value.Value} {properties.TokenSymbol}\n";
-            _lblNodeInfo.text = logStr;
-
-            var transferKeepAlive = LocalExt.Storage.BalancesCalls.TransferKeepAlive(multiAddress, amount);
-
-            try
-            {
-                var subscription = await GenericExtrinsicAsync(_client, Alice, transferKeepAlive, CancellationToken.None);
-                Debug.Log($"subscription id => {subscription}");
-            }
-            catch (Exception e)
-            {
-                Debug.LogError(e.Message);
-            }
-
-            _running = false;
+            Debug.Log("Not implemented!");
         }
 
         /// <summary>
