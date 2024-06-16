@@ -40,8 +40,6 @@ public class PolkadotManager : MonoBehaviour
 
         client = new SubstrateNetwork(null, _nodeUrl);
 
-
-        // _client = new SubstrateClientExt(new Uri(_nodeUrl), Substrate.NetApi.Model.Extrinsics.ChargeTransactionPayment.Default());
         ConnectClientAsync();
     }
 
@@ -49,10 +47,13 @@ public class PolkadotManager : MonoBehaviour
     {
         try
         {
-            // await _client.ConnectAsync();
             await client.ConnectAsync(true, true, CancellationToken.None);
             Debug.Log("Connected to Polkadot node");
-            await GetAllReferendaAsync(client, CancellationToken.None);
+            var ongoingReferenda = await GetAllReferendaAsync(client, CancellationToken.None);
+            foreach (var referendum in ongoingReferenda)
+            {
+                Debug.Log(referendum);
+            }
         }
         catch (UriFormatException ex)
         {
@@ -68,21 +69,19 @@ public class PolkadotManager : MonoBehaviour
         }
     }
 
-    static async Task GetAllReferendaAsync(SubstrateNetwork client, CancellationToken token)
+    static async Task<string[]> GetAllReferendaAsync(SubstrateNetwork client, CancellationToken token)
     {
-
         try
         {
-            // getting all referendas
+            // Getting all referendas
             Dictionary<U32, EnumReferendumInfo> referendumInfoDict = await client.GetAllStorageAsync<U32, EnumReferendumInfo>("Referenda", "ReferendumInfoFor", true, token);
 
             Debug.Log($"There are currently {referendumInfoDict.Count} referendas on Polkadot!");
 
-            // getting a single one
+            // Getting a single one
             EnumReferendumInfo enumReferendumInfo = await client.SubstrateClient.ReferendaStorage.ReferendumInfoFor(referendumInfoDict.Keys.First(), null, token);
 
             Debug.Log($"The referanda with the key {referendumInfoDict.Keys.First().Value} has the following information {enumReferendumInfo.Value}!");
-
 
             Dictionary<uint, ReferendumInfoSharp> finalDict = new Dictionary<uint, ReferendumInfoSharp>();
             foreach (var item in referendumInfoDict)
@@ -90,21 +89,25 @@ public class PolkadotManager : MonoBehaviour
                 finalDict[item.Key.Value] = new ReferendumInfoSharp(item.Value);
             }
 
-            // Now `finalDict` contains `uint` keys and `ReferendumInfoSharp` values
-            foreach (var item in finalDict)
-            {
-                Debug.Log($"Referendum: {item.Key}");
-                Debug.Log($"{JsonSerializer.Serialize(item.Value, new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter(), new Substrate.Integration.Helper.BigIntegerConverter() } })}\n" );
-            }
+            // Filter out the referenda that are not "Ongoing"
+            var ongoingReferenda = finalDict.Where(item => item.Value.ReferendumInfo == ReferendumInfo.Ongoing).ToDictionary(item => item.Key, item => item.Value);
 
+            Debug.Log($"There are currently {ongoingReferenda.Count} ongoing referendas on Polkadot!");
+
+            // Construct the array of strings in the format "key: { value }"
+            var ongoingReferendaArray = ongoingReferenda.Select(item => $"{item.Key}: {JsonSerializer.Serialize(item.Value, new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter(), new Substrate.Integration.Helper.BigIntegerConverter() } })}").ToArray();
+
+            return ongoingReferendaArray;
         }
         catch (OperationCanceledException ex)
         {
             Debug.LogError($"Operation was canceled: {ex.Message}");
+            return Array.Empty<string>();
         }
         catch (Exception ex)
         {
             Debug.LogError($"Error fetching referenda: {ex.Message}");
+            return Array.Empty<string>();
         }
     }
 }
