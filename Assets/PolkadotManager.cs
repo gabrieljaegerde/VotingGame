@@ -18,16 +18,21 @@ using System.Text.Json.Serialization;
 using Substrate.Integration.Helper;
 using Substrate;
 using Substrate.Integration;
+using TMPro;
 
 public class PolkadotManager : MonoBehaviour
 {
     [SerializeField]
     private string _nodeUrl = "wss://polkadot-rpc.dwellir.com";
 
-    [SerializeField]
-    public GameObject towerPrefab; // Reference to the tower prefab
+    public GameObject towerPrefab;
+    public GameObject infoWindow;
+    public TextMeshProUGUI referendumIdText;
+    public TextMeshProUGUI trackText;
+    public TextMeshProUGUI statusText;
 
     private SubstrateNetwork client;
+    private Dictionary<uint, ReferendumInfoSharp> ongoingReferenda;
 
     private void Start()
     {
@@ -42,7 +47,6 @@ public class PolkadotManager : MonoBehaviour
         }
 
         client = new SubstrateNetwork(null, _nodeUrl);
-
         ConnectClientAsync();
     }
 
@@ -52,12 +56,8 @@ public class PolkadotManager : MonoBehaviour
         {
             await client.ConnectAsync(true, true, CancellationToken.None);
             Debug.Log("Connected to Polkadot node");
-            var ongoingReferenda = await GetAllReferendaAsync(client, CancellationToken.None);
-            foreach (var referendum in ongoingReferenda)
-            {
-                Debug.Log(referendum);
-                CreateTowerForReferendum(referendum);
-            }
+            ongoingReferenda = await GetAllReferendaAsync(client, CancellationToken.None);
+            CreateTowersForReferenda(ongoingReferenda);
         }
         catch (UriFormatException ex)
         {
@@ -73,45 +73,10 @@ public class PolkadotManager : MonoBehaviour
         }
     }
 
-    private void CreateTowerForReferendum(string referendumInfo)
-    {
-        // Debug.Log("Creating tower for referendum: " + referendumInfo);
-
-        // Extracting the referendum ID from the string
-        var keyIndex = referendumInfo.IndexOf(':');
-        if (keyIndex > 0)
-        {
-            var key = referendumInfo.Substring(0, keyIndex);
-            if (int.TryParse(key, out int referendumId))
-            {
-                var tower = Instantiate(towerPrefab, GetRandomPosition(), Quaternion.identity);
-                // Debug.Log("Instantiated tower for referendum ID: " + referendumId);
-                var towerScript = tower.GetComponent<Tower>();
-                towerScript.ReferendumId = referendumId;
-            }
-            else
-            {
-                // Debug.LogError("Failed to parse referendum ID: " + key);
-            }
-        }
-        else
-        {
-            Debug.LogError("Invalid referendum info format: " + referendumInfo);
-        }
-    }
-
-    private Vector3 GetRandomPosition()
-    {
-        // Replace with your own logic to position the towers in your scene
-        return new Vector3(UnityEngine.Random.Range(-10, 10), 0, UnityEngine.Random.Range(-10, 10));
-    }
-
-
-    static async Task<string[]> GetAllReferendaAsync(SubstrateNetwork client, CancellationToken token)
+    static async Task<Dictionary<uint, ReferendumInfoSharp>> GetAllReferendaAsync(SubstrateNetwork client, CancellationToken token)
     {
         try
         {
-            // Getting all referendas
             Dictionary<U32, EnumReferendumInfo> referendumInfoDict = await client.GetAllStorageAsync<U32, EnumReferendumInfo>("Referenda", "ReferendumInfoFor", true, token);
 
             Debug.Log($"There are currently {referendumInfoDict.Count} referendas on Polkadot!");
@@ -122,31 +87,75 @@ public class PolkadotManager : MonoBehaviour
                 finalDict[item.Key.Value] = new ReferendumInfoSharp(item.Value);
             }
 
-            // Filter out the referenda that are not "Ongoing"
             var ongoingReferenda = finalDict.Where(item => item.Value.ReferendumInfo == ReferendumInfo.Ongoing).ToDictionary(item => item.Key, item => item.Value);
 
             Debug.Log($"There are currently {ongoingReferenda.Count} ongoing referendas on Polkadot!");
 
-            // Construct the array of strings in the format "key: { value }"
-            var ongoingReferendaArray = ongoingReferenda.Select(item => $"{item.Key}: {JsonSerializer.Serialize(item.Value, new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter(), new Substrate.Integration.Helper.BigIntegerConverter() } })}").ToArray();
-
-            // Print out the array before returning it
-            foreach (var referendum in ongoingReferendaArray)
+            foreach (var item in ongoingReferenda)
             {
-                Debug.Log(referendum);
+                Debug.Log($"Ongoing Referendum: {item.Key}");
+                Debug.Log($"{JsonSerializer.Serialize(item.Value, new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter(), new Substrate.Integration.Helper.BigIntegerConverter() } })}\n");
             }
 
-            return ongoingReferendaArray;
+            return ongoingReferenda;
         }
         catch (OperationCanceledException ex)
         {
             Debug.LogError($"Operation was canceled: {ex.Message}");
-            return Array.Empty<string>();
+            return new Dictionary<uint, ReferendumInfoSharp>();
         }
         catch (Exception ex)
         {
             Debug.LogError($"Error fetching referenda: {ex.Message}");
-            return Array.Empty<string>();
+            return new Dictionary<uint, ReferendumInfoSharp>();
         }
+    }
+
+    private void CreateTowersForReferenda(Dictionary<uint, ReferendumInfoSharp> referenda)
+    {
+        var groupedReferenda = referenda.GroupBy(r => r.Value.ReferendumStatus.Track);
+
+        float xOffset = 0;
+        float yOffset = 0;
+        float towerSpacing = 2.0f;
+        float trackSpacing = 5.0f;
+
+        foreach (var group in groupedReferenda)
+        {
+            foreach (var referendum in group)
+            {
+                Vector3 position = new Vector3(xOffset, yOffset, 0);
+                CreateTowerForReferendum(position, referendum.Key);
+                xOffset += towerSpacing;
+            }
+            xOffset = 0;
+            yOffset += trackSpacing;
+        }
+    }
+
+    private void CreateTowerForReferendum(Vector3 position, uint referendumId)
+    {
+        try
+        {
+            GameObject tower = Instantiate(towerPrefab, position, Quaternion.identity);
+            Tower towerComponent = tower.GetComponent<Tower>();
+            towerComponent.ReferendumId = (int)referendumId;
+
+            // Assign the Info Window UI elements
+            towerComponent.infoWindow = infoWindow;
+            towerComponent.referendumIdText = referendumIdText;
+            towerComponent.trackText = trackText;
+            towerComponent.statusText = statusText;
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Failed to create tower for referendum {referendumId}: {ex.Message}");
+        }
+    }
+
+    public ReferendumInfoSharp GetReferendumInfo(int referendumId)
+    {
+        ongoingReferenda.TryGetValue((uint)referendumId, out ReferendumInfoSharp referendumInfo);
+        return referendumInfo;
     }
 }
