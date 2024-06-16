@@ -24,6 +24,9 @@ public class PolkadotManager : MonoBehaviour
     [SerializeField]
     private string _nodeUrl = "wss://polkadot-rpc.dwellir.com";
 
+    [SerializeField]
+    public GameObject towerPrefab; // Reference to the tower prefab
+
     private SubstrateNetwork client;
 
     private void Start()
@@ -53,6 +56,7 @@ public class PolkadotManager : MonoBehaviour
             foreach (var referendum in ongoingReferenda)
             {
                 Debug.Log(referendum);
+                CreateTowerForReferendum(referendum);
             }
         }
         catch (UriFormatException ex)
@@ -69,6 +73,40 @@ public class PolkadotManager : MonoBehaviour
         }
     }
 
+    private void CreateTowerForReferendum(string referendumInfo)
+    {
+        // Debug.Log("Creating tower for referendum: " + referendumInfo);
+
+        // Extracting the referendum ID from the string
+        var keyIndex = referendumInfo.IndexOf(':');
+        if (keyIndex > 0)
+        {
+            var key = referendumInfo.Substring(0, keyIndex);
+            if (int.TryParse(key, out int referendumId))
+            {
+                var tower = Instantiate(towerPrefab, GetRandomPosition(), Quaternion.identity);
+                // Debug.Log("Instantiated tower for referendum ID: " + referendumId);
+                var towerScript = tower.GetComponent<Tower>();
+                towerScript.ReferendumId = referendumId;
+            }
+            else
+            {
+                // Debug.LogError("Failed to parse referendum ID: " + key);
+            }
+        }
+        else
+        {
+            Debug.LogError("Invalid referendum info format: " + referendumInfo);
+        }
+    }
+
+    private Vector3 GetRandomPosition()
+    {
+        // Replace with your own logic to position the towers in your scene
+        return new Vector3(UnityEngine.Random.Range(-10, 10), 0, UnityEngine.Random.Range(-10, 10));
+    }
+
+
     static async Task<string[]> GetAllReferendaAsync(SubstrateNetwork client, CancellationToken token)
     {
         try
@@ -77,11 +115,6 @@ public class PolkadotManager : MonoBehaviour
             Dictionary<U32, EnumReferendumInfo> referendumInfoDict = await client.GetAllStorageAsync<U32, EnumReferendumInfo>("Referenda", "ReferendumInfoFor", true, token);
 
             Debug.Log($"There are currently {referendumInfoDict.Count} referendas on Polkadot!");
-
-            // Getting a single one
-            EnumReferendumInfo enumReferendumInfo = await client.SubstrateClient.ReferendaStorage.ReferendumInfoFor(referendumInfoDict.Keys.First(), null, token);
-
-            Debug.Log($"The referanda with the key {referendumInfoDict.Keys.First().Value} has the following information {enumReferendumInfo.Value}!");
 
             Dictionary<uint, ReferendumInfoSharp> finalDict = new Dictionary<uint, ReferendumInfoSharp>();
             foreach (var item in referendumInfoDict)
@@ -96,6 +129,12 @@ public class PolkadotManager : MonoBehaviour
 
             // Construct the array of strings in the format "key: { value }"
             var ongoingReferendaArray = ongoingReferenda.Select(item => $"{item.Key}: {JsonSerializer.Serialize(item.Value, new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter(), new Substrate.Integration.Helper.BigIntegerConverter() } })}").ToArray();
+
+            // Print out the array before returning it
+            foreach (var referendum in ongoingReferendaArray)
+            {
+                Debug.Log(referendum);
+            }
 
             return ongoingReferendaArray;
         }
