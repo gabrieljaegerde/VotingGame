@@ -24,9 +24,7 @@ public class PolkadotManager : MonoBehaviour
     [SerializeField]
     private string _nodeUrl = "wss://polkadot-rpc.dwellir.com";
 
-    // private SubstrateClientExt _client;
-
-    private SubstrateClient client;
+    private SubstrateNetwork client;
 
     private void Start()
     {
@@ -70,7 +68,7 @@ public class PolkadotManager : MonoBehaviour
         }
     }
 
-    static async Task GetAllReferendaAsync(SubstrateClient client, CancellationToken token)
+    static async Task GetAllReferendaAsync(SubstrateNetwork client, CancellationToken token)
     {
 
         try
